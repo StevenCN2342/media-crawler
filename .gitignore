@@ -1,4 +1,4 @@
-# Python 虚拟环境与编译缓存
+# Python environments and caches
 .venv/
 venv/
 ENV/
@@ -6,20 +6,27 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# 编辑器与系统生成文件
+# Local environment configuration
+.env
+.env.*
+
+# Editor and OS files
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
 
-# 爬虫运行产生的大体积临时日志
-crawler/crawler.log
+# Crawler runtime data and logs
+crawler/data/
+scheduler_logs/
 *.log
-# 本地评测与测试套件目录（不上传至 GitHub）
+*.out
+*.pid
+*.lock
+*.db
+*.sqlite
+*.sqlite3
+
+# Local-only material
 benchmark/
-
-# 本地个人非代码资料
 理论文件/
-
-# （可选）如果不想把已抓取的大量数据推上 GitHub，可取消下面一行的注释：
-# crawler/data/
