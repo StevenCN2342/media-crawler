@@ -180,6 +180,7 @@ def build_registry():
         MEDIA_SITES[name] = {
             "name": name,
             "category": cat,
+            "sub_category": item.get("sub_category"),
             "home_url": url,
             "channels": channels,
             "url_pattern": url_pattern,

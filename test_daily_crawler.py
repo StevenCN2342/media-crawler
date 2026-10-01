@@ -268,6 +268,21 @@ class MemoryAndContentTests(unittest.TestCase):
         finally:
             soup.decompose()
 
+    def test_government_index_number_uses_canonical_field(self):
+        soup = self.page(
+            '<h1>完整测试标题</h1><div id="content">'
+            '<p>索 引 号</p><p>00001854-5/2026-00076</p>'
+            '<p>' + '政务正文。' * 20 + '</p></div>'
+        )
+        try:
+            data = self.m.UnifiedExtractor.parse_article(
+                soup, 'https://test.invalid/government', self.cfg
+            )
+            self.assertEqual(data['indexNumber'], '00001854-5/2026-00076')
+            self.assertEqual(tuple(data), self.m.CANONICAL_FIELDS)
+        finally:
+            soup.decompose()
+
     def test_inline_text_order_and_repeated_sentences(self):
         soup = self.page('<p>Hello <b>world</b>! Again.</p><p>Hello <b>world</b>! Again.</p>')
         try:
@@ -461,7 +476,15 @@ class MemoryAndContentTests(unittest.TestCase):
         with patch.object(crawler, 'process_page', side_effect=[[url], data]):
             self.assertEqual(crawler.crawl_site(self.cfg, 1), 1)
         output = self.folder / 'test' / 'test' / 'general.jsonl'
-        self.assertEqual(json.loads(output.read_text(encoding='utf-8')), data)
+        saved = json.loads(output.read_text(encoding='utf-8'))
+        self.assertEqual(tuple(saved), self.m.CANONICAL_FIELDS)
+        self.assertEqual(saved['url'], url)
+        self.assertEqual(saved['title'], 'Test title')
+        self.assertEqual(saved['siteName'], 'test')
+        self.assertEqual(saved['category'], 'test')
+        self.assertEqual(saved['channel'], 'general')
+        self.assertEqual(saved['images'], [])
+        self.assertIsNone(saved['subCategory'])
         self.assertIn(url, self.m.visited_mgr.visited)
 
     def test_pending_article_runs_even_when_channel_fails(self):

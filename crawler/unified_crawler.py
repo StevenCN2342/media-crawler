@@ -107,6 +107,73 @@ log = logging.getLogger("UnifiedCrawler")
 # 所有线程共用的文章文件写入锁
 article_write_lock = threading.Lock()
 
+CANONICAL_FIELDS = (
+    "url", "title", "content", "siteName", "source", "category",
+    "subCategory", "channel", "publishTime", "images", "crawledAt",
+    "docNumber", "indexNumber",
+)
+
+
+def _optional_string(value, field):
+    """把缺失或空白的可选字符串统一为 null。"""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"字段 {field} 必须是字符串或 null")
+    return value if value.strip() else None
+
+
+def canonical_article(record, site_cfg=None, channel=None):
+    """生成与现有 data/**/*.jsonl 完全一致的 13 字段记录。"""
+    site_cfg = site_cfg or {}
+    required = {}
+    for field in ("url", "title", "content"):
+        value = record.get(field)
+        if not isinstance(value, str):
+            raise ValueError(f"字段 {field} 必须是字符串")
+        if field in ("url", "title") and not value.strip():
+            raise ValueError(f"字段 {field} 不能为空")
+        required[field] = value
+
+    images = record.get("images")
+    if images is None:
+        images = []
+    if not isinstance(images, list) or any(not isinstance(item, str) for item in images):
+        raise ValueError("字段 images 必须是字符串数组或 null")
+
+    def first(*values):
+        return next((value for value in values
+                     if value is not None
+                     and (not isinstance(value, str) or value.strip())), None)
+
+    normalized = {
+        **required,
+        "siteName": _optional_string(first(
+            record.get("siteName"), record.get("site_name"),
+            record.get("media_name"), site_cfg.get("name")), "siteName"),
+        "source": _optional_string(record.get("source"), "source"),
+        "category": _optional_string(first(
+            record.get("category"), record.get("media_category"),
+            site_cfg.get("category")), "category"),
+        "subCategory": _optional_string(first(
+            record.get("subCategory"), record.get("sub_category"),
+            site_cfg.get("sub_category")), "subCategory"),
+        "channel": _optional_string(first(record.get("channel"), channel), "channel"),
+        "publishTime": _optional_string(first(
+            record.get("publishTime"), record.get("publish_time")), "publishTime"),
+        "images": list(images),
+        "crawledAt": _optional_string(first(
+            record.get("crawledAt"), record.get("crawled_at"),
+            record.get("crawl_time")), "crawledAt"),
+        "docNumber": _optional_string(first(
+            record.get("docNumber"), record.get("doc_number")), "docNumber"),
+        "indexNumber": _optional_string(first(
+            record.get("indexNumber"), record.get("index_number")), "indexNumber"),
+    }
+    if tuple(normalized) != CANONICAL_FIELDS:
+        raise AssertionError("文章字段集合或顺序不符合统一规范")
+    return normalized
+
 
 # ─── URL 去重管理器 ────────────────────────────────────────────────────────────
 class VisitedManager:
@@ -513,11 +580,29 @@ class UnifiedExtractor:
                     break
 
         doc_number = ""
+        index_number = ""
         doc_pattern = re.compile(r'(〔\d{4}〕\d+号|〔\d{4}〕第\d+号|\d{4}第\d+号|[国省市县发办]\d{4}\d+号)')
+        index_pattern = re.compile(r'[0-9A-Za-z][0-9A-Za-z._/-]{3,}')
+        awaiting_index = False
         for text_node in soup.stripped_strings:
+            text_node = str(text_node).strip()
             doc_match = doc_pattern.search(text_node)
-            if doc_match:
+            if doc_match and not doc_number:
                 doc_number = doc_match.group(1)
+            compact = re.sub(r'\s+', '', text_node)
+            if awaiting_index and not index_number:
+                index_match = index_pattern.fullmatch(compact)
+                if index_match:
+                    index_number = index_match.group(0)
+                awaiting_index = False
+            if not index_number and "索引号" in compact:
+                candidate = compact.split("索引号", 1)[1].lstrip(":：")
+                index_match = index_pattern.match(candidate)
+                if index_match:
+                    index_number = index_match.group(0)
+                elif not candidate:
+                    awaiting_index = True
+            if doc_number and index_number:
                 break
 
         # 4. 正文提取
@@ -559,19 +644,21 @@ class UnifiedExtractor:
                     if len(images) == 5:
                         break
 
-        return {
-            "media_name": site_cfg["name"],
+        return canonical_article({
+            "siteName": site_cfg["name"],
             "category": site_cfg["category"],
+            "subCategory": site_cfg.get("sub_category"),
             "channel": channel_name,
             "title": title,
-            "publish_time": pub_time or datetime.now().strftime("%Y-%m-%d"),
+            "publishTime": pub_time or datetime.now().strftime("%Y-%m-%d"),
             "source": source or site_cfg["name"],
-            "doc_number": doc_number,
+            "docNumber": doc_number,
+            "indexNumber": index_number,
             "content": content,
             "images": images[:5],
             "url": url,
-            "crawled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+            "crawledAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }, site_cfg, channel_name)
 
 
 class PageMemoryExceeded(Exception):
@@ -801,10 +888,11 @@ class UnifiedCrawler:
                     data = self.process_page(key, site_cfg, ch_name)
                     if not data:
                         raise ValueError("没有完整可用的标题/正文；保留下载，不标记成功")
+                    data = canonical_article(data, site_cfg, ch_name)
                     self.tasks.update(key, phase="save")
                     with article_write_lock:
                         with open(out_file, "a", encoding="utf-8") as f:
-                            json.dump(data, f, ensure_ascii=False)
+                            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
                             f.write("\n")
                         visited_mgr.mark_success(link)
                     self.tasks.done(key)

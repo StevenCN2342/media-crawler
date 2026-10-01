@@ -92,21 +92,25 @@ crawler/data/
 每篇文章以单行 JSON 格式记录，包含字段：
 ```json
 {
-  "media_name": "分宜县融媒体中心",
-  "category": "地方新闻单位",
-  "channel": "综合",
+  "url": "http://www.fenyi.gov.cn/fenyi/xzxta/2025-12/24/content_xxx.shtml",
   "title": "对县政协十五届五次会议第067号提案的答复",
-  "publish_time": "2026-09-14",
-  "source": "分宜县人民政府",
-  "doc_number": "3605210001-2026-00620",
   "content": "一、强化居家养老服务，激发消费市场活力...\n（清洗后的结构化正文全文）",
+  "siteName": "分宜县融媒体中心",
+  "source": "分宜县人民政府",
+  "category": "地方新闻单位",
+  "subCategory": null,
+  "channel": "综合",
+  "publishTime": "2026-09-14",
   "images": [
     "http://www.fenyi.gov.cn/fenyi/xhtml/images/logo.png"
   ],
-  "url": "http://www.fenyi.gov.cn/fenyi/xzxta/2025-12/24/content_xxx.shtml",
-  "crawled_at": "2026-09-14 09:01:37"
+  "crawledAt": "2026-09-14 09:01:37",
+  "docNumber": "3605210001-2026-00620",
+  "indexNumber": null
 }
 ```
+
+字段及顺序固定为 `url`、`title`、`content`、`siteName`、`source`、`category`、`subCategory`、`channel`、`publishTime`、`images`、`crawledAt`、`docNumber`、`indexNumber`。前三项必须是字符串，且 URL 和标题不能为空；缺失或空白的可选字符串写为 `null`，缺失图片写为 `[]`。新记录可直接与已经过 converter 转换的数据混合追加，无需再次转换。
 
 ---
 
