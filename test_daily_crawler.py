@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import io
+from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
 import daily_crawler as daily
@@ -91,6 +93,13 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(
             daily.next_scheduled_time(moment(14, 18, 1)), moment(15, 18)
         )
+
+    def test_check_accepts_run_now_without_starting(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["daily_crawler.py", "--check", "--run-now"]), \
+                redirect_stdout(output):
+            self.assertEqual(daily.main(), 0)
+        self.assertIn("--run-now", output.getvalue())
 
     def test_invalid_loop_count(self):
         for count in (0, -1, True, 1.5):

@@ -229,6 +229,8 @@ def main():
         return run_crawler(sys.argv[2:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="只检查配置、打印参数，不采集")
+    parser.add_argument("--run-now", action="store_true",
+                        help="启动后立即先执行当天批次，完成后继续等待每日定时任务")
     parser.add_argument("--task-status", action="store_true", help="只显示任务汇总和未完成URL")
     parser.add_argument("--retry-task", metavar="URL", help="停止调度与采集后，将该URL重新放回待处理队列；不立即采集")
     options = parser.parse_args()
@@ -264,6 +266,8 @@ def main():
         print(f"每天北京时间 {SCHEDULE_HOUR:02d}:{SCHEDULE_MINUTE:02d} 启动，"
               f"当天连续完成 {LOOP_COUNT} 轮；异常立即重试当前轮，不计入完成次数。")
         print(f"按当前时间计算，下次启动：{next_run.isoformat()}")
+        if options.run_now:
+            print("已指定 --run-now：正式启动时会立即先执行一批，完成后继续每日定时。")
         print("断点为 data/visited_urls.txt 中的已保存 URL；每天轮数重新从 0 开始。")
         return 0
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -283,16 +287,22 @@ def main():
             log.info("每日调度器启动，名录=%s，每天 %02d:%02d 开始，"
                      "每日目标轮数=%s，参数=%s", count, SCHEDULE_HOUR,
                      SCHEDULE_MINUTE, LOOP_COUNT, arguments)
+            run_immediately = options.run_now
             while not stopping:
-                target = next_scheduled_time(datetime.now(tz))
-                log.info("等待下次任务：%s", target.isoformat())
-                while not stopping:
-                    remaining = (target - datetime.now(tz)).total_seconds()
-                    if remaining <= 0:
+                if run_immediately:
+                    target = datetime.now(tz)
+                    run_immediately = False
+                    log.info("收到 --run-now，立即开始手动批次")
+                else:
+                    target = next_scheduled_time(datetime.now(tz))
+                    log.info("等待下次任务：%s", target.isoformat())
+                    while not stopping:
+                        remaining = (target - datetime.now(tz)).total_seconds()
+                        if remaining <= 0:
+                            break
+                        time.sleep(min(POLL_SECONDS, remaining))
+                    if stopping:
                         break
-                    time.sleep(min(POLL_SECONDS, remaining))
-                if stopping:
-                    break
                 scheduler = DailyScheduler(
                     datetime.now(tz), lambda now: launch_crawler(arguments, now)
                 )

@@ -237,12 +237,15 @@ tail -f crawler/crawler.log
 ```bash
 python daily_crawler.py --check
 python daily_crawler.py
+python daily_crawler.py --run-now
 ```
 
 第一条只检查配置并显示按当前时间计算的下一次启动时间；第二条启动常驻调度器，
 等待每天北京时间 18:00 开始当天的采集批次。当天各轮连续执行，默认完成 50 轮后
 等待次日 18:00，不退出调度器。文件顶部 `LOOP_COUNT = 50` 控制每天正常完成的轮数，
 `SCHEDULE_HOUR = 18`、`SCHEDULE_MINUTE = 0` 控制北京时间开跑时刻；异常退出不消耗轮数。
+第三条保留手动立即运行能力：启动后不等待 18:00，立即先执行一批 50 轮；完成后
+不会退出，而是继续等待下一次每日 18:00。`--check --run-now` 只显示该运行模式，不采集。
 发现子进程非零退出（包括 OOM 后的 -9）后立即重启当前轮，检测间隔为
 `POLL_SECONDS = 1` 秒；没有额外重试等待或重试次数上限。
 长期无法恢复的故障会持续重试，自动重试并不能解决内存不足。
@@ -278,6 +281,12 @@ python daily_crawler.py
 Ctrl+C / SIGTERM 停止后续调度，已启动的爬虫继续执行。
 同一项目的进程锁阻止重复调度器和重叠采集；旧爬虫仍运行时，新调度器等待运行锁。
 不要删除锁文件，也不要同时手动运行 `crawler/main.py` 向同一目录写入。
+
+只需手动立即执行一轮、不启动常驻调度器时，仍可直接运行原主入口：
+
+```bash
+python crawler/main.py --all --max-articles 20 --workers 8 --limit 0
+```
 
 离线测试（临时假入口，不访问网站）：
 
