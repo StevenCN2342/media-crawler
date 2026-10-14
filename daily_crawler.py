@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""立即开始连续采集，完成指定轮数后退出；失败立即重试当前轮。
+"""每天北京时间 18:00 开始连续采集，完成当天指定轮数后等待次日。
 
 启动：python daily_crawler.py
 只检查配置：python daily_crawler.py --check
@@ -19,9 +19,11 @@ LIST_SITES = False     # --list-sites：True 时每轮只打印名单，不采�
 # 单媒体或分类采集：将 ALL 改为 False，再设置 NAME 或 CATEGORY（二选一）。
 
 # ===== 调度参数 =====
-LOOP_COUNT = 50        # 正常退出的轮数；异常重试不计入，每次启动调度器重新计数
-UTC_OFFSET_HOURS = 8   # 仅用于日志文件名，不限制启动时间
-POLL_SECONDS = 1       # 发现进程退出的检查间隔；发现失败后不额外等待
+LOOP_COUNT = 50        # 每天正常完成的轮数；异常重试不计入
+SCHEDULE_HOUR = 18     # 每天开始时间（北京时间）
+SCHEDULE_MINUTE = 0
+UTC_OFFSET_HOURS = 8
+POLL_SECONDS = 1       # 等待开跑及检查进程退出的间隔
 
 import argparse
 from datetime import datetime, timedelta, timezone
@@ -116,6 +118,10 @@ def validate_config():
     args = build_arguments()
     if type(LOOP_COUNT) is not int or LOOP_COUNT < 1:
         raise ValueError("LOOP_COUNT 必须是 >= 1 的整数")
+    if type(SCHEDULE_HOUR) is not int or not 0 <= SCHEDULE_HOUR <= 23:
+        raise ValueError("SCHEDULE_HOUR 必须是 0 到 23 的整数")
+    if type(SCHEDULE_MINUTE) is not int or not 0 <= SCHEDULE_MINUTE <= 59:
+        raise ValueError("SCHEDULE_MINUTE 必须是 0 到 59 的整数")
     if not 0 < POLL_SECONDS <= 60:
         raise ValueError("POLL_SECONDS 必须大于 0 且不超过 60")
     timezone(timedelta(hours=UTC_OFFSET_HOURS))
@@ -129,6 +135,15 @@ def validate_config():
            for item in manifest):
         raise ValueError("媒体名录中的每项必须包含 name 和 category")
     return args, len(manifest)
+
+
+def next_scheduled_time(now):
+    """返回 now 之后最近一次每天固定开跑时间。"""
+    target = now.replace(hour=SCHEDULE_HOUR, minute=SCHEDULE_MINUTE,
+                         second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
 
 
 def run_crawler(arguments):
@@ -242,10 +257,14 @@ def main():
     arguments, count = validate_config()
     tz = timezone(timedelta(hours=UTC_OFFSET_HOURS))
     if options.check:
+        now = datetime.now(tz)
+        next_run = next_scheduled_time(now)
         print(f"配置通过；名录 {count} 条；日志文件时区 {tz}")
         print("参数：" + json.dumps(arguments, ensure_ascii=False))
-        print(f"立即启动，连续完成 {LOOP_COUNT} 轮；异常立即重试当前轮，不计入完成次数。")
-        print("断点为 data/visited_urls.txt 中的已保存 URL；每次重启调度器轮数从 0 开始。")
+        print(f"每天北京时间 {SCHEDULE_HOUR:02d}:{SCHEDULE_MINUTE:02d} 启动，"
+              f"当天连续完成 {LOOP_COUNT} 轮；异常立即重试当前轮，不计入完成次数。")
+        print(f"按当前时间计算，下次启动：{next_run.isoformat()}")
+        print("断点为 data/visited_urls.txt 中的已保存 URL；每天轮数重新从 0 开始。")
         return 0
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
@@ -261,13 +280,31 @@ def main():
     signal.signal(signal.SIGTERM, request_stop)
     try:
         with ProcessLock(SCHEDULER_LOCK):
-            scheduler = DailyScheduler(datetime.now(tz), lambda now: launch_crawler(arguments, now))
-            log.info("立即循环调度启动，名录=%s，目标轮数=%s，参数=%s",
-                     count, LOOP_COUNT, arguments)
-            while not stopping and not scheduler.finished:
-                scheduler.step(datetime.now(tz))
-                if not scheduler.finished and not stopping:
-                    time.sleep(POLL_SECONDS)
+            log.info("每日调度器启动，名录=%s，每天 %02d:%02d 开始，"
+                     "每日目标轮数=%s，参数=%s", count, SCHEDULE_HOUR,
+                     SCHEDULE_MINUTE, LOOP_COUNT, arguments)
+            while not stopping:
+                target = next_scheduled_time(datetime.now(tz))
+                log.info("等待下次任务：%s", target.isoformat())
+                while not stopping:
+                    remaining = (target - datetime.now(tz)).total_seconds()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(POLL_SECONDS, remaining))
+                if stopping:
+                    break
+                scheduler = DailyScheduler(
+                    datetime.now(tz), lambda now: launch_crawler(arguments, now)
+                )
+                log.info("开始 %s 的每日任务，共 %s 轮",
+                         target.date().isoformat(), LOOP_COUNT)
+                while not stopping and not scheduler.finished:
+                    scheduler.step(datetime.now(tz))
+                    if not scheduler.finished and not stopping:
+                        time.sleep(POLL_SECONDS)
+                if scheduler.finished:
+                    log.info("%s 的每日任务已完成，共 %s 轮；等待下一天",
+                             target.date().isoformat(), LOOP_COUNT)
             if stopping:
                 log.info("停止后续调度；已启动的爬虫继续执行。")
         return 0

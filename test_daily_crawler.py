@@ -85,6 +85,13 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(self.launch.call_count, 50)
         self.assertTrue(scheduler.finished)
 
+    def test_next_daily_run_is_1800_china_time(self):
+        self.assertEqual(daily.next_scheduled_time(moment(14, 17)), moment(14, 18))
+        self.assertEqual(daily.next_scheduled_time(moment(14, 18)), moment(15, 18))
+        self.assertEqual(
+            daily.next_scheduled_time(moment(14, 18, 1)), moment(15, 18)
+        )
+
     def test_invalid_loop_count(self):
         for count in (0, -1, True, 1.5):
             with self.assertRaises(ValueError):
